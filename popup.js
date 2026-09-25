@@ -1,7 +1,9 @@
-/* StudentDataExporter v2.7 - readable source (no obfuscation)
+/* StudentDataExporter v2.8 - readable source (no obfuscation)
  * One-click batch export: grades 1..6 -> single sheet, boys-first then girls per grade.
  * Data source: POST https://studaapi.emis.gov.eg/api/Student/GetSchoolStudent {acdYearCode:"1".."6"}
  *
+ * v2.8: removed the unused "عمود 7" column -> the sheet is now 15 columns A..O and all
+ *       cell references in the H..O formulas were re-mapped (year anchor is $L$1).
  * v2.7: removed the diagnostics button/output; simplified popup UI for non-technical users.
  * v2.6: fixed filename "كل الفصول <YYYY-MM-DD HH-MM>.xlsx" (local time) downloaded via an
  *       anchor (chrome.downloads + blob: URLs can save as the blob UUID); removed the
@@ -505,7 +507,8 @@ async function runExport(retryOnly) {
 }
 
 // ---------- XLSX builder (store-only ZIP, no external libs) ----------
-// Layout matches the v1 file: 16 cols A..P, 2 header rows, formulas I..P from national ID.
+// Layout matches the v1 file minus the unused "عمود 7" column: 15 cols A..O,
+// 2 header rows, formulas H..O derived from the national ID in $C.
 function escXml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -633,10 +636,10 @@ function buildXlsx(rows, refYear) {
     if (!idx.has(v)) { idx.set(v, strings.length); strings.push(v); }
     return idx.get(v);
   };
-  const H1 = ['كود التلميذ', 'اسم التلميذ', 'الرقم القومى', 'الصف', 'الفصل', 'الجنسيه', 'عمود 7', 'النوع', 'تاريخ الميلاد تفصيلا', '', '', 'تاريخ الميلاد كاملا', String(refYear), '', '', 'السن كاملا'];
-  const H2 = ['', '', '', '', '', '', '', '', 'يوم', 'شهر', 'سنة', '', 'يوم', 'شهر', 'سنة', ''];
+  const H1 = ['كود التلميذ', 'اسم التلميذ', 'الرقم القومى', 'الصف', 'الفصل', 'الجنسيه', 'النوع', 'تاريخ الميلاد تفصيلا', '', '', 'تاريخ الميلاد كاملا', String(refYear), '', '', 'السن كاملا'];
+  const H2 = ['', '', '', '', '', '', '', 'يوم', 'شهر', 'سنة', '', 'يوم', 'شهر', 'سنة', ''];
   H1.forEach(S); H2.forEach(S);
-  S('غير محدد'); S('ذكر'); S('أنثى'); S('اختر'); S('مصرى');
+  S('غير محدد'); S('ذكر'); S('أنثى'); S('مصرى');
   for (const r of rows) {
     S(r.studentCode != null ? String(r.studentCode) : '');
     S(r.studentName || '');
@@ -644,23 +647,23 @@ function buildXlsx(rows, refYear) {
     S(r.className || GRADE_NAMES[r._grade] || '');
     S(r.classNumber != null ? String(r.classNumber) : '');
     S(r.nationality || 'مصرى');
-    S('اختر');
     S(r.sexId === 1 ? 'ذكر' : 'أنثى');
   }
 
   const ssXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="' + (rows.length * 8 + 30) + '" uniqueCount="' + strings.length + '">' +
     strings.map(s => '<si><t xml:space="preserve">' + escXml(s) + '</t></si>').join('') + '</sst>';
 
-  // formulas per row (same logic as v1 file, derived from $C national ID)
+  // formulas per row, derived from $C national ID (15-col layout after removing عمود 7:
+  // H=day, I=month, J=year, K=full date, L=age days, M=age months, N=age years [anchor $L$1], O=full age)
   const F = (r) => ({
-    I: 'IFERROR(IF(AND(LEN($C' + r + ')=14,OR(LEFT($C' + r + ',1)="2",LEFT($C' + r + ',1)="3"),MONTH(DATE((IF(LEFT($C' + r + ',1)="2",1900,2000)+VALUE(MID($C' + r + ',2,2))),VALUE(MID($C' + r + ',4,2)),VALUE(MID($C' + r + ',6,2))))=VALUE(MID($C' + r + ',4,2)),DAY(DATE((IF(LEFT($C' + r + ',1)="2",1900,2000)+VALUE(MID($C' + r + ',2,2))),VALUE(MID($C' + r + ',4,2)),VALUE(MID($C' + r + ',6,2))))=VALUE(MID($C' + r + ',6,2))),VALUE(MID($C' + r + ',6,2)),"غير محدد"),"غير محدد")',
-    J: 'IFERROR(IF(AND(LEN($C' + r + ')=14,OR(LEFT($C' + r + ',1)="2",LEFT($C' + r + ',1)="3"),MONTH(DATE((IF(LEFT($C' + r + ',1)="2",1900,2000)+VALUE(MID($C' + r + ',2,2))),VALUE(MID($C' + r + ',4,2)),VALUE(MID($C' + r + ',6,2))))=VALUE(MID($C' + r + ',4,2)),DAY(DATE((IF(LEFT($C' + r + ',1)="2",1900,2000)+VALUE(MID($C' + r + ',2,2))),VALUE(MID($C' + r + ',4,2)),VALUE(MID($C' + r + ',6,2))))=VALUE(MID($C' + r + ',6,2))),VALUE(MID($C' + r + ',4,2)),"غير محدد"),"غير محدد")',
-    K: 'IFERROR(IF(AND(LEN($C' + r + ')=14,OR(LEFT($C' + r + ',1)="2",LEFT($C' + r + ',1)="3"),MONTH(DATE((IF(LEFT($C' + r + ',1)="2",1900,2000)+VALUE(MID($C' + r + ',2,2))),VALUE(MID($C' + r + ',4,2)),VALUE(MID($C' + r + ',6,2))))=VALUE(MID($C' + r + ',4,2)),DAY(DATE((IF(LEFT($C' + r + ',1)="2",1900,2000)+VALUE(MID($C' + r + ',2,2))),VALUE(MID($C' + r + ',4,2)),VALUE(MID($C' + r + ',6,2))))=VALUE(MID($C' + r + ',6,2))),(IF(LEFT($C' + r + ',1)="2",1900,2000)+VALUE(MID($C' + r + ',2,2))),"غير محدد"),"غير محدد")',
-    L: 'IFERROR(IF(ISNUMBER(K' + r + '),K' + r + '&"/"&RIGHT("0"&J' + r + ',2)&"/"&RIGHT("0"&I' + r + ',2),"غير محدد"),"غير محدد")',
-    M: 'IFERROR(IF(ISNUMBER(O' + r + '),IF(I' + r + '>1,31-I' + r + ',1-I' + r + '),"غير محدد"),"غير محدد")',
-    N: 'IFERROR(IF(ISNUMBER(O' + r + '),MOD(10-J' + r + '-IF(I' + r + '>1,1,0),12),"غير محدد"),"غير محدد")',
-    O: 'IFERROR(IF(ISNUMBER(K' + r + '),IF($M$1-K' + r + '-IF(10-J' + r + '-IF(I' + r + '>1,1,0)<0,1,0)<0,"غير محدد",$M$1-K' + r + '-IF(10-J' + r + '-IF(I' + r + '>1,1,0)<0,1,0)),"غير محدد"),"غير محدد")',
-    P: 'IFERROR(IF(ISNUMBER(O' + r + '),RIGHT("0"&O' + r + ',2)&"/"&RIGHT("0"&N' + r + ',2)&"/"&RIGHT("0"&M' + r + ',2),"غير محدد"),"غير محدد")'
+    H: 'IFERROR(IF(AND(LEN($C' + r + ')=14,OR(LEFT($C' + r + ',1)="2",LEFT($C' + r + ',1)="3"),MONTH(DATE((IF(LEFT($C' + r + ',1)="2",1900,2000)+VALUE(MID($C' + r + ',2,2))),VALUE(MID($C' + r + ',4,2)),VALUE(MID($C' + r + ',6,2))))=VALUE(MID($C' + r + ',4,2)),DAY(DATE((IF(LEFT($C' + r + ',1)="2",1900,2000)+VALUE(MID($C' + r + ',2,2))),VALUE(MID($C' + r + ',4,2)),VALUE(MID($C' + r + ',6,2))))=VALUE(MID($C' + r + ',6,2))),VALUE(MID($C' + r + ',6,2)),"غير محدد"),"غير محدد")',
+    I: 'IFERROR(IF(AND(LEN($C' + r + ')=14,OR(LEFT($C' + r + ',1)="2",LEFT($C' + r + ',1)="3"),MONTH(DATE((IF(LEFT($C' + r + ',1)="2",1900,2000)+VALUE(MID($C' + r + ',2,2))),VALUE(MID($C' + r + ',4,2)),VALUE(MID($C' + r + ',6,2))))=VALUE(MID($C' + r + ',4,2)),DAY(DATE((IF(LEFT($C' + r + ',1)="2",1900,2000)+VALUE(MID($C' + r + ',2,2))),VALUE(MID($C' + r + ',4,2)),VALUE(MID($C' + r + ',6,2))))=VALUE(MID($C' + r + ',6,2))),VALUE(MID($C' + r + ',4,2)),"غير محدد"),"غير محدد")',
+    J: 'IFERROR(IF(AND(LEN($C' + r + ')=14,OR(LEFT($C' + r + ',1)="2",LEFT($C' + r + ',1)="3"),MONTH(DATE((IF(LEFT($C' + r + ',1)="2",1900,2000)+VALUE(MID($C' + r + ',2,2))),VALUE(MID($C' + r + ',4,2)),VALUE(MID($C' + r + ',6,2))))=VALUE(MID($C' + r + ',4,2)),DAY(DATE((IF(LEFT($C' + r + ',1)="2",1900,2000)+VALUE(MID($C' + r + ',2,2))),VALUE(MID($C' + r + ',4,2)),VALUE(MID($C' + r + ',6,2))))=VALUE(MID($C' + r + ',6,2))),(IF(LEFT($C' + r + ',1)="2",1900,2000)+VALUE(MID($C' + r + ',2,2))),"غير محدد"),"غير محدد")',
+    K: 'IFERROR(IF(ISNUMBER(J' + r + '),J' + r + '&"/"&RIGHT("0"&I' + r + ',2)&"/"&RIGHT("0"&H' + r + ',2),"غير محدد"),"غير محدد")',
+    L: 'IFERROR(IF(ISNUMBER(N' + r + '),IF(H' + r + '>1,31-H' + r + ',1-H' + r + '),"غير محدد"),"غير محدد")',
+    M: 'IFERROR(IF(ISNUMBER(N' + r + '),MOD(10-I' + r + '-IF(H' + r + '>1,1,0),12),"غير محدد"),"غير محدد")',
+    N: 'IFERROR(IF(ISNUMBER(J' + r + '),IF($L$1-J' + r + '-IF(10-I' + r + '-IF(H' + r + '>1,1,0)<0,1,0)<0,"غير محدد",$L$1-J' + r + '-IF(10-I' + r + '-IF(H' + r + '>1,1,0)<0,1,0)),"غير محدد"),"غير محدد")',
+    O: 'IFERROR(IF(ISNUMBER(N' + r + '),RIGHT("0"&N' + r + ',2)&"/"&RIGHT("0"&M' + r + ',2)&"/"&RIGHT("0"&L' + r + ',2),"غير محدد"),"غير محدد")'
   });
 
   const col = (letter, style, val, isStr) => {
@@ -678,11 +681,11 @@ function buildXlsx(rows, refYear) {
   let sheetData = '';
   // header row 1 (styles 1/2/3 like v1)
   sheetData += '<row r="1" ht="24" customHeight="1">';
-  const h1styles = [1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 2];
-  const cols = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P'];
+  const h1styles = [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 2];
+  const cols = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O'];
   H1.forEach((h, i) => {
     const L = cols[i], st = h1styles[i];
-    if (i === 12) sheetData += '<c r="M1" s="3"><v>' + refYear + '</v></c>';
+    if (i === 11) sheetData += '<c r="L1" s="3"><v>' + refYear + '</v></c>';
     else if (h === '') sheetData += '<c r="' + L + '1" s="' + st + '"/>';
     else sheetData += '<c r="' + L + '1" s="' + st + '" t="s"><v>' + S(h) + '</v></c>';
   });
@@ -709,22 +712,21 @@ function buildXlsx(rows, refYear) {
     sheetData += col('D' + rn, dataStyle, S(r.className || GRADE_NAMES[r._grade] || ''), true);
     sheetData += col('E' + rn, dataStyle, S(r.classNumber != null ? String(r.classNumber) : ''), true);
     sheetData += col('F' + rn, dataStyle, S(r.nationality || 'مصرى'), true);
-    sheetData += col('G' + rn, dataStyle, S('اختر'), true);
-    sheetData += col('H' + rn, dataStyle, S(r.sexId === 1 ? 'ذكر' : 'أنثى'), true);
-    sheetData += fcell('I' + rn, dataStyle, f.I, bv.I);
-    sheetData += fcell('J' + rn, dataStyle, f.J, bv.J);
-    sheetData += fcell('K' + rn, dataStyle, f.K, bv.K);
-    sheetData += fcell('L' + rn, dataStyle, f.L, bv.L);
-    sheetData += fcell('M' + rn, dataStyle, f.M, bv.M);
-    sheetData += fcell('N' + rn, dataStyle, f.N, bv.N);
-    sheetData += fcell('O' + rn, dataStyle, f.O, bv.O);
-    sheetData += fcell('P' + rn, dataStyle, f.P, bv.P);
+    sheetData += col('G' + rn, dataStyle, S(r.sexId === 1 ? 'ذكر' : 'أنثى'), true);
+    sheetData += fcell('H' + rn, dataStyle, f.H, bv.I);
+    sheetData += fcell('I' + rn, dataStyle, f.I, bv.J);
+    sheetData += fcell('J' + rn, dataStyle, f.J, bv.K);
+    sheetData += fcell('K' + rn, dataStyle, f.K, bv.L);
+    sheetData += fcell('L' + rn, dataStyle, f.L, bv.M);
+    sheetData += fcell('M' + rn, dataStyle, f.M, bv.N);
+    sheetData += fcell('N' + rn, dataStyle, f.N, bv.O);
+    sheetData += fcell('O' + rn, dataStyle, f.O, bv.P);
     sheetData += '</row>';
   });
 
   const sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView rightToLeft="1" workbookViewId="0"><pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/><selection activeCell="A1" sqref="A1"/></sheetView></sheetViews>' +
-    '<sheetFormatPr defaultRowHeight="14.25"/><cols><col customWidth="1" min="1" max="1" width="14"/><col customWidth="1" min="2" max="2" width="42"/><col customWidth="1" min="3" max="3" width="17"/><col customWidth="1" min="4" max="4" width="13"/><col customWidth="1" min="5" max="5" width="8"/><col customWidth="1" min="6" max="6" width="10"/><col customWidth="1" min="7" max="7" width="9"/><col customWidth="1" min="8" max="8" width="10"/><col customWidth="1" min="9" max="11" width="9"/><col customWidth="1" min="12" max="12" width="15"/><col customWidth="1" min="13" max="15" width="9"/><col customWidth="1" min="16" max="16" width="15"/></cols>' +
+    '<sheetFormatPr defaultRowHeight="14.25"/><cols><col customWidth="1" min="1" max="1" width="14"/><col customWidth="1" min="2" max="2" width="42"/><col customWidth="1" min="3" max="3" width="17"/><col customWidth="1" min="4" max="4" width="13"/><col customWidth="1" min="5" max="5" width="8"/><col customWidth="1" min="6" max="6" width="10"/><col customWidth="1" min="7" max="7" width="10"/><col customWidth="1" min="8" max="10" width="9"/><col customWidth="1" min="11" max="11" width="15"/><col customWidth="1" min="12" max="14" width="9"/><col customWidth="1" min="15" max="15" width="15"/></cols>' +
     '<sheetData>' + sheetData + '</sheetData></worksheet>';
 
   const stylesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="&quot;السن في 1/10/&quot;0"/></numFmts><fonts count="2"><font><sz val="11.000000"/><name val="Arial"/></font><font><b/><sz val="11.000000"/><color indexed="65"/><name val="Arial"/></font></fonts><fills count="6"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF4CAF50"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFF9800"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFE6F0"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE6F3FF"/></patternFill></fill></fills><borders count="2"><border><left style="none"/><right style="none"/><top style="none"/><bottom style="none"/><diagonal style="none"/></border><border><left style="thin"><color auto="1"/></left><right style="thin"><color auto="1"/></right><top style="thin"><color auto="1"/></top><bottom style="thin"><color auto="1"/></bottom><diagonal style="none"/></border></borders><cellStyleXfs count="1"><xf fontId="0" fillId="0" borderId="0" numFmtId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/></cellStyleXfs><cellXfs count="7"><xf fontId="0" fillId="0" borderId="0" numFmtId="0" xfId="0"/><xf fontId="1" fillId="2" borderId="1" numFmtId="0" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf fontId="1" fillId="3" borderId="1" numFmtId="0" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf fontId="1" fillId="3" borderId="1" numFmtId="164" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf fontId="0" fillId="0" borderId="1" numFmtId="0" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="right"/></xf><xf fontId="0" fillId="4" borderId="1" numFmtId="0" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right"/></xf><xf fontId="0" fillId="5" borderId="1" numFmtId="0" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
@@ -733,7 +735,7 @@ function buildXlsx(rows, refYear) {
   const wbRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
   const contentTypes = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>';
   const core = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><cp:lastModifiedBy>StudentDataExporter</cp:lastModifiedBy></cp:coreProperties>';
-  const app = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>StudentDataExporter v2.7</Application></Properties>';
+  const app = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>StudentDataExporter v2.8</Application></Properties>';
 
   return zipStore([
     { name: '[Content_Types].xml', data: encUtf8(contentTypes) },

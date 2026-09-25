@@ -21,7 +21,7 @@ Chrome extension (Manifest V3) that exports **all students of a school (grades 1
 
 ## What's in the file
 
-- One sheet, RTL, 16 columns (A–P): student code, name, national ID, grade, class, gender, plus birth date and age at 1/10 of the **current year** derived from the national ID (values are pre-computed so they show in any spreadsheet app, with the original formulas kept for Excel).
+- One sheet, RTL, 15 columns (A–O): student code, name, national ID, grade, class, gender, plus birth date and age at 1/10 of the **current year** derived from the national ID (values are pre-computed so they show in any spreadsheet app, with the original formulas kept for Excel).
 - Rows are colored by gender: **boys = sky blue, girls = pink**.
 - Boys-first / girls-first / alphabetical ordering per grade.
 
