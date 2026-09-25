@@ -1,7 +1,8 @@
-/* StudentDataExporter v2.9 - readable source (no obfuscation)
+/* StudentDataExporter v2.10 - readable source (no obfuscation)
  * One-click batch export: grades 1..6 (الابتدائي) -> single sheet, boys-first then girls per grade.
  * Data source: POST https://studaapi.emis.gov.eg/api/Student/GetSchoolStudent {acdYearCode:"1".."6"}
  *
+ * v2.10: filename is now ابتدائي-كل-الفصول-<YYYY-MM-DD-HH-MM>.xlsx (no spaces).
  * v2.9: popup label clarifies the grades are الابتدائي (primary).
  * v2.8: removed the unused "عمود 7" column -> the sheet is now 15 columns A..O and all
  *       cell references in the H..O formulas were re-mapped (year anchor is $L$1).
@@ -365,7 +366,7 @@ async function runExport(retryOnly) {
   const retryBtn = document.getElementById('retryBtn');
   const sortMode = document.getElementById('sort').value;
   const refYear = new Date().getFullYear(); // السن في 1/10 — always the current year
-  const baseName = 'كل الفصول';
+  const baseName = 'ابتدائي-كل-الفصول';
 
   let grades = retryOnly && lastFailedGrades.length ? lastFailedGrades.slice() : selectedGrades();
   if (!grades.length) { setStatus('اختر صفاً واحداً على الأقل'); return; }
@@ -465,11 +466,12 @@ async function runExport(retryOnly) {
     const bytes = buildXlsx(allRows, refYear);
     const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const blobUrl = URL.createObjectURL(blob);
-    // readable local timestamp: كل الفصول 2026-09-25 14-30.xlsx (no ":" — illegal in Windows names)
+    // readable local timestamp, no spaces: ابتدائي-كل-الفصول-2026-09-25-20-36.xlsx
+    // (":" and " " are avoided — Windows forbids ":", spaces are ugly in filenames)
     const p2 = (n) => String(n).padStart(2, '0');
     const d = new Date();
-    const stamp = d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + '-' + p2(d.getMinutes());
-    const filename = baseName + ' ' + stamp + '.xlsx';
+    const stamp = d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + '-' + p2(d.getHours()) + '-' + p2(d.getMinutes());
+    const filename = baseName + '-' + stamp + '.xlsx';
 
     try {
       // Anchor with the download attribute names blob downloads reliably;
@@ -736,7 +738,7 @@ function buildXlsx(rows, refYear) {
   const wbRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
   const contentTypes = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>';
   const core = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><cp:lastModifiedBy>StudentDataExporter</cp:lastModifiedBy></cp:coreProperties>';
-  const app = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>StudentDataExporter v2.9</Application></Properties>';
+  const app = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>StudentDataExporter v2.10</Application></Properties>';
 
   return zipStore([
     { name: '[Content_Types].xml', data: encUtf8(contentTypes) },
