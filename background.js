@@ -1,7 +1,9 @@
-/* StudentDataExporter v3.3 - background service worker.
+/* StudentDataExporter v3.4 - background service worker.
  * Runs the whole export (auth read -> API fetch per grade -> XLSX build -> download)
  * so it keeps going even if the popup is closed. Progress is persisted to
  * chrome.storage.session under 'exportState'; a reopened popup shows it live.
+ * v3.4: fail-fast pre-flight — an expired session (401/403) is reported right after
+ *       clicking download, not after every grade was tried.
  * v3.3: friendlier Arabic status wording; success message shows the saved filename.
  * v3.2: the file name reflects the selected grades (ابتدائي-كل-الفصول when all six,
  *       otherwise grades-<numbers>); fresh exports clear the previous run's cache.
@@ -239,12 +241,59 @@ async function startExport(retryOnly, gradesArg, sortMode) {
     const perGrade = [];
     const failed = [];
     let done = 0;
-    for (const g of grades) {
+    let preferPage = false;
+
+    // Pre-flight on the FIRST selected grade: auth problems (401/403) must surface
+    // immediately, not after every grade was tried. If the extension-origin request
+    // is rejected but the page-origin one works, prefer the page for the rest.
+    const first = grades[0];
+    st.status = 'جاري تحميل ' + GRADE_NAMES[first] + ' (1 من ' + grades.length + ')...';
+    save();
+    let firstRows = null;
+    let firstError = null;
+    try {
+      firstRows = await fetchGrade(tab.id, first, headers);
+    } catch (e1) {
+      const m1 = String((e1 && e1.message) || e1);
+      if (!st.cancelled && /401|403|4\d\d|5\d\d|Failed to fetch|NetworkError/i.test(m1)) {
+        try {
+          firstRows = await fetchGradeViaPage(tab.id, first, headers);
+          preferPage = true;
+        } catch (e2) {
+          firstError = m1 + ' | عبر الصفحة: ' + String((e2 && e2.message) || e2).slice(0, 140);
+        }
+      } else {
+        firstError = m1;
+      }
+    }
+    if (st.cancelled) { st.lastFailed = grades.slice(); await finish('تم الإلغاء'); return; }
+    if (firstError) {
+      // fail fast: show the problem right away, don't try the remaining grades
+      st.lastFailed = grades.slice();
+      if (/401|403/.test(firstError)) {
+        st.status = '⛔ انتهت جلسة الدخول أو الصلاحية غير كافية — حدّث صفحة المدرسة (F5) وسجّل الدخول ثم أعد المحاولة';
+        st.counts = 'الخطوات:\n1) اضغط F5 على صفحة student.emis.gov.eg\n2) سجّل الدخول من جديد\n3) افتح الإضافة واضغط تنزيل مرة أخرى\n[' + firstError.slice(0, 100) + ']';
+      } else {
+        st.status = '⛔ توقف التنزيل من أول خطوة: ' + firstError.slice(0, 140);
+      }
+      await finish();
+      return;
+    }
+    const taggedFirst = firstRows.map(function (s) { return Object.assign({ _grade: first }, s); });
+    perGrade.push({ grade: first, rows: taggedFirst });
+    cachedSuccess.set(first, taggedFirst);
+    done++;
+    st.done = done;
+    save();
+
+    for (const g of grades.slice(1)) {
       if (st.cancelled) break;
       st.status = 'جاري تحميل ' + GRADE_NAMES[g] + ' (' + (done + 1) + ' من ' + grades.length + ')...';
       save();
       try {
-        const r = await fetchOneGrade(tab.id, g, headers);
+        const r = preferPage
+          ? { rows: await fetchGradeViaPage(tab.id, g, headers), via: 'page' }
+          : await fetchOneGrade(tab.id, g, headers);
         const tagged = (r.rows || []).map(function (s) { return Object.assign({ _grade: g }, s); });
         perGrade.push({ grade: g, rows: tagged });
         cachedSuccess.set(g, tagged);
