@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "أداة تصدير بيانات الطلاب (دفعة واحدة)",
-  "version": "3.0",
+  "version": "3.1",
   "description": "أداة احترافية لتصدير بيانات الطلاب (كل الصفوف دفعة واحدة) إلى Excel — نسختي الخاصة.",
   "action": {
     "default_popup": "popup.html",
@@ -10,7 +10,7 @@
   "background": {
     "service_worker": "background.js"
   },
-  "permissions": ["activeTab", "scripting", "downloads", "storage"],
+  "permissions": ["activeTab", "scripting", "downloads", "storage", "offscreen"],
   "host_permissions": [
     "https://student.emis.gov.eg/*",
     "https://studaapi.emis.gov.eg/*"

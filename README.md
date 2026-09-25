@@ -47,6 +47,7 @@ No data leaves your machine except the API calls the extension makes to EMIS its
 | `popup.js` | Popup controller (sends commands, shows live progress) |
 | `background.js` | Service worker: runs the whole export — survives closing the popup |
 | `shared.js` | Shared logic: auth reading, API fetch, sorting, XLSX builder (no libraries) |
+| `offscreen.html` / `offscreen.js` | Saves the generated file with its proper filename (anchor download) |
 | `headerHook.js` | Captures the site's own API request headers |
 
 ---

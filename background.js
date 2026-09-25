@@ -132,6 +132,43 @@ function bytesToBase64(bytes) {
   return btoa(bin);
 }
 
+// Chrome names data-URL downloads "download" and ignores the filename, and the
+// service worker has no DOM for anchor downloads. So the file is handed to an
+// offscreen page which saves it via an anchor download (filename always honored).
+const OFFSCREEN_URL = 'offscreen.html';
+async function saveFile(bytes, filename) {
+  const b64 = bytesToBase64(bytes);
+  try {
+    await chrome.offscreen.createDocument({
+      url: OFFSCREEN_URL,
+      reasons: ['BLOBS'],
+      justification: 'حفظ ملف Excel المُنشأ بالاسم الصحيح'
+    });
+  } catch (e) { /* already exists — reuse it */ }
+  const done = new Promise(function (resolve) {
+    const listener = function (msg) {
+      if (msg && msg.type === 'offscreen-download-done') {
+        try { chrome.runtime.onMessage.removeListener(listener); } catch (e) {}
+        resolve(true);
+      }
+      return false;
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    setTimeout(function () {
+      try { chrome.runtime.onMessage.removeListener(listener); } catch (e) {}
+      resolve(false);
+    }, 15000);
+  });
+  try {
+    chrome.runtime.sendMessage({ type: 'download-xlsx', filename: filename, b64: b64 }, function () { void chrome.runtime.lastError; });
+  } catch (e) {
+    try { await chrome.offscreen.closeDocument(); } catch (e2) {}
+    throw e;
+  }
+  await done;
+  try { await chrome.offscreen.closeDocument(); } catch (e) {}
+}
+
 async function startExport(retryOnly, gradesArg, sortMode) {
   if (st.running) return;
   let grades = retryOnly ? (st.lastFailed || []).slice() : (gradesArg || []).slice();
@@ -223,8 +260,7 @@ async function startExport(retryOnly, gradesArg, sortMode) {
     const d = new Date();
     const stamp = d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + '-' + p2(d.getHours()) + '-' + p2(d.getMinutes());
     const filename = FILE_BASE + '-' + stamp + '.xlsx';
-    const dataUrl = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,' + bytesToBase64(bytes);
-    await chrome.downloads.download({ url: dataUrl, filename: filename, saveAs: false, conflictAction: 'uniquify' });
+    await saveFile(bytes, filename);
 
     await finish(failed.length
       ? '✔ تم تنزيل ' + allRows.length + ' تلميذ — لكن فشل: ' + failed.map(function (g) { return GRADE_NAMES[g]; }).join('، ')
