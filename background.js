@@ -1,14 +1,36 @@
-/* StudentDataExporter v3.0 - background service worker.
+/* StudentDataExporter v3.2 - background service worker.
  * Runs the whole export (auth read -> API fetch per grade -> XLSX build -> download)
  * so it keeps going even if the popup is closed. Progress is persisted to
  * chrome.storage.session under 'exportState'; a reopened popup shows it live.
+ * v3.2: the file name reflects the selected grades (ابتدائي-كل-الفصول when all six,
+ *       otherwise grades-<numbers>); fresh exports clear the previous run's cache.
  */
 'use strict';
 
 if (typeof importScripts === 'function') { importScripts('shared.js'); }
 
 const STATE_KEY = 'exportState';
-const FILE_BASE = 'ابتدائي-كل-الفصول';
+
+// File name reflects the grades actually in the file:
+//   all six      -> ابتدائي-كل-الفصول-<timestamp>.xlsx
+//   contiguous   -> grades-1,2,3,4-<timestamp>.xlsx   (listed number by number)
+//   with gaps    -> grades-1,3-5-<timestamp>.xlsx      (runs of 3+ compress to a range)
+function fileBaseFor(gradesInFile) {
+  const uniq = Array.from(new Set(gradesInFile)).sort(function (a, b) { return a - b; });
+  const all = [1, 2, 3, 4, 5, 6];
+  if (uniq.length === all.length && all.every(function (g, i) { return uniq[i] === g; })) return 'ابتدائي-كل-الفصول';
+  const contiguous = uniq.length > 0 && (uniq[uniq.length - 1] - uniq[0] + 1 === uniq.length);
+  if (contiguous) return 'grades-' + uniq.join(',');
+  const parts = [];
+  let i = 0;
+  while (i < uniq.length) {
+    let j = i;
+    while (j + 1 < uniq.length && uniq[j + 1] === uniq[j] + 1) j++;
+    parts.push((j - i + 1) >= 3 ? uniq[i] + '-' + uniq[j] : uniq.slice(i, j + 1).join(','));
+    i = j + 1;
+  }
+  return 'grades-' + parts.join(',');
+}
 
 let st = { running: false, done: 0, total: 0, status: '', counts: '', lastFailed: [], cancelled: false };
 let cachedSuccess = new Map(); // grade -> rows (kept so retry merges with earlier successes)
@@ -178,6 +200,7 @@ async function startExport(retryOnly, gradesArg, sortMode) {
     return;
   }
   const refYear = new Date().getFullYear(); // السن في 1/10 — always the current year
+  if (!retryOnly) cachedSuccess.clear(); // fresh run: never leak grades from a previous run
   st = { running: true, done: 0, total: grades.length, status: 'قراءة بيانات الدخول من صفحة EMIS...', counts: '', lastFailed: st.lastFailed || [], cancelled: false };
   save();
   // keep the service worker alive while the export runs
@@ -259,7 +282,8 @@ async function startExport(retryOnly, gradesArg, sortMode) {
     const p2 = function (n) { return String(n).padStart(2, '0'); };
     const d = new Date();
     const stamp = d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + '-' + p2(d.getHours()) + '-' + p2(d.getMinutes());
-    const filename = FILE_BASE + '-' + stamp + '.xlsx';
+    const gradesInFile = Array.from(new Set(allRows.map(function (r) { return r._grade; })));
+    const filename = fileBaseFor(gradesInFile) + '-' + stamp + '.xlsx';
     await saveFile(bytes, filename);
 
     await finish(failed.length
@@ -285,3 +309,6 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   }
   return false;
 });
+
+// expose for testing in Node (ignored in browser)
+try { if (typeof module !== 'undefined') { module.exports = { fileBaseFor }; } } catch (e) {}
