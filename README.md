@@ -17,7 +17,10 @@ Chrome extension (Manifest V3) that exports **all students of a school (grades 1
 1. Open the EMIS student portal and log in.
 2. Click the extension icon.
 3. Pick the grades (default: all), choose the ordering, and press **⬇ تنزيل ملف Excel**.
-4. The file is saved as `كل الفصول YYYY-MM-DD HH-MM.xlsx` (local timestamp).
+4. The file is saved as `ابتدائي-كل-الفصول-<YYYY-MM-DD-HH-MM>.xlsx` (local timestamp).
+5. You can close the popup while it downloads — the export runs in a background
+   service worker and the file is saved automatically. Reopen the popup any time
+   to see progress or the final result.
 
 ## What's in the file
 
@@ -41,7 +44,9 @@ No data leaves your machine except the API calls the extension makes to EMIS its
 |---|---|
 | `manifest.json` | Extension manifest (MV3) |
 | `popup.html` | Popup UI |
-| `popup.js` | Export logic + XLSX builder (no external libraries) |
+| `popup.js` | Popup controller (sends commands, shows live progress) |
+| `background.js` | Service worker: runs the whole export — survives closing the popup |
+| `shared.js` | Shared logic: auth reading, API fetch, sorting, XLSX builder (no libraries) |
 | `headerHook.js` | Captures the site's own API request headers |
 
 ---
