@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "أداة تصدير بيانات الطلاب (دفعة واحدة)",
-  "version": "2.8",
+  "version": "2.9",
   "description": "أداة احترافية لتصدير بيانات الطلاب (كل الصفوف دفعة واحدة) إلى Excel — نسختي الخاصة.",
   "action": {
     "default_popup": "popup.html",
