@@ -1,0 +1,15 @@
+# Generated exports / downloads
+*.xlsx
+*.xls
+*.zip
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+*.swp
+*~
+.idea/
+.vscode/
