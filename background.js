@@ -1,7 +1,8 @@
-/* StudentDataExporter v3.2 - background service worker.
+/* StudentDataExporter v3.3 - background service worker.
  * Runs the whole export (auth read -> API fetch per grade -> XLSX build -> download)
  * so it keeps going even if the popup is closed. Progress is persisted to
  * chrome.storage.session under 'exportState'; a reopened popup shows it live.
+ * v3.3: friendlier Arabic status wording; success message shows the saved filename.
  * v3.2: the file name reflects the selected grades (ابتدائي-كل-الفصول when all six,
  *       otherwise grades-<numbers>); fresh exports clear the previous run's cache.
  */
@@ -240,7 +241,7 @@ async function startExport(retryOnly, gradesArg, sortMode) {
     let done = 0;
     for (const g of grades) {
       if (st.cancelled) break;
-      st.status = 'جاري تحميل الصف ' + GRADE_NAMES[g] + ' (' + (done + 1) + '/' + grades.length + ')...';
+      st.status = 'جاري تحميل ' + GRADE_NAMES[g] + ' (' + (done + 1) + ' من ' + grades.length + ')...';
       save();
       try {
         const r = await fetchOneGrade(tab.id, g, headers);
@@ -285,10 +286,12 @@ async function startExport(retryOnly, gradesArg, sortMode) {
     const gradesInFile = Array.from(new Set(allRows.map(function (r) { return r._grade; })));
     const filename = fileBaseFor(gradesInFile) + '-' + stamp + '.xlsx';
     await saveFile(bytes, filename);
+    // tell the teacher exactly which file to look for in the Downloads folder
+    st.counts += '\n📁 اسم الملف: ' + filename;
 
     await finish(failed.length
-      ? '✔ تم تنزيل ' + allRows.length + ' تلميذ — لكن فشل: ' + failed.map(function (g) { return GRADE_NAMES[g]; }).join('، ')
-      : '✔ تم التنزيل: ' + allRows.length + ' تلميذ في ملف واحد');
+      ? '✔ اكتمل التنزيل — ' + allRows.length + ' تلميذ، لكن فشل: ' + failed.map(function (g) { return GRADE_NAMES[g]; }).join('، ')
+      : '✔ اكتمل التنزيل بنجاح! ' + allRows.length + ' تلميذ في ملف واحد');
   } catch (e) {
     await finish('خطأ: ' + ((e && e.message) || e));
   }

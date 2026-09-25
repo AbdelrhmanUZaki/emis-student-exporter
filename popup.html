@@ -3,61 +3,63 @@
 <head>
 <meta charset="UTF-8">
 <style>
-body { width: 300px; padding: 14px; font-family: 'Segoe UI', Tahoma, sans-serif; background: #f9f9f9; margin: 0; font-size: 13px; }
-h3 { color: #2c3e50; font-size: 16px; margin: 0 0 10px; text-align: center; }
+body { width: 330px; padding: 14px; font-family: 'Segoe UI', Tahoma, sans-serif; background: #f9f9f9; margin: 0; font-size: 14px; }
+h3 { color: #2c3e50; font-size: 18px; margin: 0 0 12px; text-align: center; }
 .section { background: #fff; border: 1px solid #e3e3e3; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
 .section-title { font-weight: bold; margin-bottom: 8px; color: #34495e; font-size: 13px; }
-.grades { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
-.grades label { background: #eef6f0; border: 1px solid #cfe6d6; border-radius: 6px; padding: 6px 4px; text-align: center; cursor: pointer; font-size: 12px; }
-.grades input { margin-left: 4px; }
-.row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.row label { flex: 1; color: #555; font-size: 12px; }
-.row select { flex: 1; padding: 5px; border: 1px solid #ccc; border-radius: 6px; font-size: 12px; }
-.linkbtn { background: none; border: none; color: #2980b9; cursor: pointer; font-size: 11px; padding: 0; }
-#exportBtn { background: #27ae60; color: #fff; border: none; padding: 12px; font-size: 15px; border-radius: 6px; cursor: pointer; width: 100%; font-weight: bold; }
+.section-title .soft { font-weight: normal; color: #888; }
+.grades { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.grades label { background: #eef6f0; border: 1px solid #cfe6d6; border-radius: 6px; padding: 7px 6px; text-align: center; cursor: pointer; font-size: 13px; }
+.grades input { margin-left: 4px; transform: scale(1.15); vertical-align: middle; }
+.row { display: flex; align-items: center; gap: 8px; }
+.row label { flex: 1; color: #555; font-size: 13px; }
+.row select { flex: 1; padding: 6px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
+.linkbtn { background: none; border: none; color: #2980b9; cursor: pointer; font-size: 12px; padding: 0; }
+#exportBtn { background: #27ae60; color: #fff; border: none; padding: 13px; font-size: 16px; border-radius: 8px; cursor: pointer; width: 100%; font-weight: bold; }
 #exportBtn:disabled { background: #95a5a6; cursor: wait; }
-#retryBtn { background: #e67e22; color: #fff; border: none; padding: 8px; font-size: 12px; border-radius: 6px; cursor: pointer; width: 100%; margin-top: 6px; display: none; }
+#retryBtn { background: #e67e22; color: #fff; border: none; padding: 9px; font-size: 13px; border-radius: 6px; cursor: pointer; width: 100%; margin-top: 6px; display: none; }
 #progress { height: 8px; background: #ecf0f1; border-radius: 5px; margin-top: 8px; overflow: hidden; display: none; }
 #progressBar { height: 100%; width: 0%; background: #27ae60; transition: width .2s; }
-#status { margin-top: 8px; font-size: 12px; color: #2c3e50; min-height: 18px; text-align: center; }
-#counts { font-size: 11px; color: #666; text-align: center; margin-top: 4px; white-space: pre-line; }
-.hint { font-size: 11px; color: #888; text-align: center; margin-top: 6px; }
+#status { margin-top: 8px; font-size: 13px; color: #2c3e50; min-height: 20px; text-align: center; font-weight: bold; }
+#counts { font-size: 12px; color: #555; text-align: center; margin-top: 4px; white-space: pre-line; }
+.hint { font-size: 12px; color: #888; text-align: center; margin-top: 6px; }
 .footer { margin-top: 10px; font-size: 11px; color: #7f8c8d; border-top: 1px solid #ddd; padding-top: 8px; text-align: center; }
 </style>
 </head>
 <body>
-<h3>📊 تصدير بيانات الطلاب</h3>
+<h3>📊 تصدير بيانات التلاميذ</h3>
 
 <div class="section">
-<div class="section-title">اختر الصفوف (الابتدائي) <button class="linkbtn" id="allBtn">الكل</button> / <button class="linkbtn" id="noneBtn">ولا أحد</button></div>
+<div class="section-title">الخطوة 1 — اختر الصفوف <span class="soft">(الابتدائي)</span>: <button class="linkbtn" id="allBtn">الكل</button> / <button class="linkbtn" id="noneBtn">ولا أحد</button></div>
 <div class="grades">
-<label><input type="checkbox" id="grade-1" checked> الأول</label>
-<label><input type="checkbox" id="grade-2" checked> الثاني</label>
-<label><input type="checkbox" id="grade-3" checked> الثالث</label>
-<label><input type="checkbox" id="grade-4" checked> الرابع</label>
-<label><input type="checkbox" id="grade-5" checked> الخامس</label>
-<label><input type="checkbox" id="grade-6" checked> السادس</label>
+<label><input type="checkbox" id="grade-1" checked> الصف الأول</label>
+<label><input type="checkbox" id="grade-2" checked> الصف الثاني</label>
+<label><input type="checkbox" id="grade-3" checked> الصف الثالث</label>
+<label><input type="checkbox" id="grade-4" checked> الصف الرابع</label>
+<label><input type="checkbox" id="grade-5" checked> الصف الخامس</label>
+<label><input type="checkbox" id="grade-6" checked> الصف السادس</label>
 </div>
 </div>
 
 <div class="section">
-<div class="row"><label>ترتيب الأسماء</label>
+<div class="section-title">الخطوة 2 — ترتيب الأسماء داخل الملف</div>
+<div class="row">
 <select id="sort">
-<option value="boys-first" selected>بنين أولاً ثم بنات</option>
-<option value="girls-first">بنات أولاً ثم بنين</option>
-<option value="alpha">أبجدي</option>
+<option value="boys-first" selected>البنين قبل البنات</option>
+<option value="girls-first">البنات قبل البنين</option>
+<option value="alpha">أبجدي بالاسم</option>
 </select></div>
 </div>
 
-<button id="exportBtn">⬇ تنزيل ملف Excel</button>
-<button id="cancelBtn" style="background:#7f8c8d;color:#fff;border:none;padding:8px;font-size:12px;border-radius:6px;cursor:pointer;width:100%;margin-top:6px;display:none">✖ إلغاء</button>
+<button id="exportBtn">⬇ تنزيل ملف الإكسل</button>
+<button id="cancelBtn" style="background:#7f8c8d;color:#fff;border:none;padding:9px;font-size:13px;border-radius:6px;cursor:pointer;width:100%;margin-top:6px;display:none">✖ إيقاف التنزيل</button>
 <button id="retryBtn">↻ إعادة المحاولة للصفوف التي فشلت</button>
-<div class="hint">يمكنك إغلاق هذه النافذة أثناء التنزيل — سيكتمل ويُحفظ تلقائياً ✔</div>
+<div class="hint">بعد الضغط يمكنك إغلاق النافذة — الملف ينزل تلقائياً في مجلد «التنزيلات» ✔</div>
 <div id="progress"><div id="progressBar"></div></div>
 <div id="status"></div>
 <div id="counts"></div>
 
-<div class="footer">مبنية على جهد مستر مصطفى عصمت، شكراً له<br><span style="font-size:10px;color:#999">v3.2</span></div>
+<div class="footer">مبنية على جهد مستر مصطفى عصمت، شكراً له<br><span style="font-size:10px;color:#999">v3.3</span></div>
 <script src="shared.js"></script>
 <script src="popup.js"></script>
 </body>
