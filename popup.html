@@ -23,6 +23,7 @@ h3 { color: #2c3e50; font-size: 18px; margin: 0 0 12px; text-align: center; }
 #status { margin-top: 8px; font-size: 13px; color: #2c3e50; min-height: 20px; text-align: center; font-weight: bold; }
 #counts { font-size: 12px; color: #555; text-align: center; margin-top: 4px; white-space: pre-line; }
 .hint { font-size: 12px; color: #888; text-align: center; margin-top: 6px; }
+.detect-note { font-size: 11px; color: #8a8a8a; text-align: center; margin-top: 7px; }
 .footer { margin-top: 10px; font-size: 11px; color: #7f8c8d; border-top: 1px solid #ddd; padding-top: 8px; text-align: center; }
 </style>
 </head>
@@ -30,15 +31,9 @@ h3 { color: #2c3e50; font-size: 18px; margin: 0 0 12px; text-align: center; }
 <h3>📊 تصدير بيانات التلاميذ</h3>
 
 <div class="section">
-<div class="section-title">الخطوة 1 — اختر الصفوف <span class="soft">(الابتدائي)</span>: <button class="linkbtn" id="allBtn">الكل</button> / <button class="linkbtn" id="noneBtn">ولا أحد</button></div>
-<div class="grades">
-<label><input type="checkbox" id="grade-1" checked> الصف الأول</label>
-<label><input type="checkbox" id="grade-2" checked> الصف الثاني</label>
-<label><input type="checkbox" id="grade-3" checked> الصف الثالث</label>
-<label><input type="checkbox" id="grade-4" checked> الصف الرابع</label>
-<label><input type="checkbox" id="grade-5" checked> الصف الخامس</label>
-<label><input type="checkbox" id="grade-6" checked> الصف السادس</label>
-</div>
+<div class="section-title">الخطوة 1 — اختر الصفوف <span class="soft" id="stageTag">(جاري التعرف على المرحلة...)</span>: <button class="linkbtn" id="allBtn">الكل</button> / <button class="linkbtn" id="noneBtn">ولا أحد</button></div>
+<div class="grades" id="gradesBox"></div>
+<div class="detect-note" id="detectNote"></div>
 </div>
 
 <div class="section">
@@ -58,7 +53,7 @@ h3 { color: #2c3e50; font-size: 18px; margin: 0 0 12px; text-align: center; }
 <div id="status"></div>
 <div id="counts"></div>
 
-<div class="footer">مبنية على جهد مستر مصطفى عصمت، شكراً له<br><span style="font-size:10px;color:#999">v3.6</span></div>
+<div class="footer">مبنية على جهد مستر مصطفى عصمت، شكراً له<br><span id="verTag" style="font-size:10px;color:#999;cursor:default">v3.7</span></div>
 <script src="shared.js"></script>
 <script src="popup.js"></script>
 </body>

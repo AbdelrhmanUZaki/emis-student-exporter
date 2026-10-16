@@ -1,41 +1,59 @@
-/* StudentDataExporter v3.4 - background service worker.
+/* StudentDataExporter v3.7 - background service worker.
  * Runs the whole export (auth read -> API fetch per grade -> XLSX build -> download)
  * so it keeps going even if the popup is closed. Progress is persisted to
  * chrome.storage.session under 'exportState'; a reopened popup shows it live.
+ * v3.7: stage-aware — the account stage (ابتدائي/إعدادي/حضانة) is detected from the
+ *       site's own Schoolstage header or the "المرحلة" page label; grades beyond the
+ *       stage are dropped automatically and names/file reflect the stage.
  * v3.4: fail-fast pre-flight — an expired session (401/403) is reported right after
  *       clicking download, not after every grade was tried.
  * v3.3: friendlier Arabic status wording; success message shows the saved filename.
- * v3.2: the file name reflects the selected grades (ابتدائي-كل-الفصول when all six,
- *       otherwise grades-<numbers>); fresh exports clear the previous run's cache.
+ * v3.2: the file name reflects the selected grades (مرحلة-كل-الصفوف or
+ *       مرحلة-صفوف-<numbers>); fresh exports clear the previous run's cache.
  */
 'use strict';
 
 if (typeof importScripts === 'function') { importScripts('shared.js'); }
 
 const STATE_KEY = 'exportState';
+const STAGE_INFO_KEY = 'stageInfo';
 
-// File name reflects the grades actually in the file:
-//   all six      -> ابتدائي-كل-الفصول-<timestamp>.xlsx
-//   contiguous   -> grades-1,2,3,4-<timestamp>.xlsx   (listed number by number)
-//   with gaps    -> grades-1,3-5-<timestamp>.xlsx      (runs of 3+ compress to a range)
-function fileBaseFor(gradesInFile) {
+// File name — one rule for every case, all Arabic:
+//   all grades of the stage -> ابتدائي-كل-الصفوف_<date>_<time>.xlsx
+//   any partial selection   -> إعدادي-صفوف-1,3_<date>_<time>.xlsx
+// Grade lists are ALWAYS comma-separated (no 1-3 ranges), so every '-'/'_' has
+// exactly one meaning and the name/date boundary is always obvious.
+// Unknown stage (legacy fallback): the stage word is simply omitted.
+function fileBaseFor(gradesInFile, stage) {
   const uniq = Array.from(new Set(gradesInFile)).sort(function (a, b) { return a - b; });
-  const all = [1, 2, 3, 4, 5, 6];
-  if (uniq.length === all.length && all.every(function (g, i) { return uniq[i] === g; })) return 'ابتدائي-كل-الفصول';
-  const contiguous = uniq.length > 0 && (uniq[uniq.length - 1] - uniq[0] + 1 === uniq.length);
-  if (contiguous) return 'grades-' + uniq.join(',');
-  const parts = [];
-  let i = 0;
-  while (i < uniq.length) {
-    let j = i;
-    while (j + 1 < uniq.length && uniq[j + 1] === uniq[j] + 1) j++;
-    parts.push((j - i + 1) >= 3 ? uniq[i] + '-' + uniq[j] : uniq.slice(i, j + 1).join(','));
-    i = j + 1;
-  }
-  return 'grades-' + parts.join(',');
+  const stg = stage && STAGES[stage] ? STAGES[stage] : null;
+  const all = stg ? stg.grades : [1, 2, 3, 4, 5, 6];
+  const full = uniq.length === all.length && all.every(function (g, i) { return uniq[i] === g; });
+  const body = full ? 'كل-الصفوف' : ('صفوف-' + uniq.join(','));
+  return (stg ? stg.fileWord + '-' : '') + body;
 }
 
-let st = { running: false, done: 0, total: 0, status: '', counts: '', lastFailed: [], cancelled: false };
+// Account stage: the captured Schoolstage header wins (it drives the API),
+// the "المرحلة" page label is the fallback; null = unknown (keep old behavior).
+function resolveStage(a, pageStage) {
+  const num = (a && ((a.captured && a.captured.schoolstage) || a.schoolstage)) || null;
+  const byNum = stageFromSchoolstage(num);
+  if (byNum) return byNum;
+  if (pageStage && pageStage.stage) return pageStage.stage;
+  return null;
+}
+
+// Diagnostics ([EMIS-TS] logs + the popup 🔍 line) are OFF for regular users.
+// Hidden toggle: 5 quick clicks on the version number at the popup footer,
+// or run chrome.storage.local.set({ emisDebug: true }) in the popup console.
+async function isDebugOn() {
+  try {
+    const d = await chrome.storage.local.get('emisDebug');
+    return !!(d && d.emisDebug);
+  } catch (e) { return false; }
+}
+
+let st = { running: false, done: 0, total: 0, status: '', counts: '', lastFailed: [], cancelled: false, stage: null, ignoredGrades: 0 };
 let cachedSuccess = new Map(); // grade -> rows (kept so retry merges with earlier successes)
 let currentAbort = null;
 let keepAlive = null;
@@ -204,7 +222,7 @@ async function startExport(retryOnly, gradesArg, sortMode) {
   }
   const refYear = new Date().getFullYear(); // السن في 1/10 — always the current year
   if (!retryOnly) cachedSuccess.clear(); // fresh run: never leak grades from a previous run
-  st = { running: true, done: 0, total: grades.length, status: 'قراءة بيانات الدخول من صفحة EMIS...', counts: '', lastFailed: st.lastFailed || [], cancelled: false };
+  st = { running: true, done: 0, total: grades.length, status: 'قراءة بيانات الدخول من صفحة EMIS...', counts: '', lastFailed: st.lastFailed || [], cancelled: false, stage: null, ignoredGrades: 0 };
   save();
   // keep the service worker alive while the export runs
   keepAlive = setInterval(function () { try { chrome.runtime.getPlatformInfo(function () {}); } catch (e) {} }, 20000);
@@ -232,7 +250,43 @@ async function startExport(retryOnly, gradesArg, sortMode) {
       await finish();
       return;
     }
-    const headers = buildApiHeaders(a);
+    // Stage detection: the Schoolstage header captured from the site's own calls
+    // wins (it drives the API), then the "المرحلة" label on the page. Unknown stage
+    // keeps the old behavior (whatever the user selected, 1–6).
+    const debug = await isDebugOn();
+    let pageStage = null;
+    try {
+      const r = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: detectStageInPage, args: [debug] });
+      pageStage = (r && r[0] && r[0].result) || null;
+    } catch (e) {}
+    st.stage = resolveStage(a, pageStage);
+    const capStage = (a.captured && a.captured.schoolstage) || a.schoolstage || null;
+    const stageSource = stageFromSchoolstage(capStage)
+      ? 'Schoolstage=' + capStage
+      : ((pageStage && pageStage.stage) ? (pageStage.source || 'page') : null);
+    if (debug) { try { console.log('[EMIS-TS] export detection: captured schoolstage=' + capStage + ' | pageStage=' + JSON.stringify(pageStage) + ' => ' + st.stage + ' (' + (stageSource || 'unknown') + ')'); } catch (e) {} }
+    try { chrome.storage.session.set({ [STAGE_INFO_KEY]: { stage: st.stage, source: stageSource, text: (pageStage && pageStage.text) || '', ts: Date.now() } }); } catch (e) {}
+    // Drop grades that don't exist in this stage (e.g. 4–6 on إعدادي) — no junk requests.
+    if (st.stage && STAGES[st.stage]) {
+      const allowed = STAGES[st.stage].grades;
+      const before = grades.length;
+      grades = grades.filter(function (g) { return allowed.indexOf(g) !== -1; });
+      st.ignoredGrades = before - grades.length;
+      if (!grades.length) {
+        await finish('⛔ لا صفوف صالحة لمرحلة «' + STAGES[st.stage].label + '» — أعد فتح النافذة واختر الصفوف من جديد');
+        return;
+      }
+      if (st.ignoredGrades && debug) {
+        try { console.log('[EMIS-TS] stage ' + st.stage + ': dropped ' + st.ignoredGrades + ' grade(s) outside the stage; keeping [' + grades.join(',') + ']'); } catch (e) {}
+      }
+      st.total = grades.length;
+      save();
+    }
+    const nameOf = function (g) {
+      const names = (st.stage && STAGES[st.stage] && STAGES[st.stage].names) || GRADE_NAMES;
+      return names[g] || GRADE_NAMES[g] || ('صف ' + g);
+    };
+    const headers = buildApiHeaders(a, st.stage);
     if (!a.captured) {
       try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', files: ['headerHook.js'] }); } catch (e) {}
     }
@@ -247,7 +301,7 @@ async function startExport(retryOnly, gradesArg, sortMode) {
     // immediately, not after every grade was tried. If the extension-origin request
     // is rejected but the page-origin one works, prefer the page for the rest.
     const first = grades[0];
-    st.status = 'جاري تحميل ' + GRADE_NAMES[first] + ' (1 من ' + grades.length + ')...';
+    st.status = 'جاري تحميل ' + nameOf(first) + ' (1 من ' + grades.length + ')...';
     save();
     let firstRows = null;
     let firstError = null;
@@ -288,7 +342,7 @@ async function startExport(retryOnly, gradesArg, sortMode) {
 
     for (const g of grades.slice(1)) {
       if (st.cancelled) break;
-      st.status = 'جاري تحميل ' + GRADE_NAMES[g] + ' (' + (done + 1) + ' من ' + grades.length + ')...';
+      st.status = 'جاري تحميل ' + nameOf(g) + ' (' + (done + 1) + ' من ' + grades.length + ')...';
       save();
       try {
         const r = preferPage
@@ -316,34 +370,68 @@ async function startExport(retryOnly, gradesArg, sortMode) {
 
     // clean, non-technical progress lines
     const lines = perGrade.map(function (p) {
-      if (p.error) return GRADE_NAMES[p.grade] + ': فشل — ' + String(p.error).slice(0, 140);
-      return GRADE_NAMES[p.grade] + ': ' + p.rows.length + ' تلميذ' + (p.rows.length === 0 ? ' ⚠' : '');
+      if (p.error) return nameOf(p.grade) + ': فشل — ' + String(p.error).slice(0, 140);
+      return nameOf(p.grade) + ': ' + p.rows.length + ' تلميذ' + (p.rows.length === 0 ? ' ⚠' : '');
     });
-    st.counts = lines.join('\n') + '\nالإجمالي: ' + allRows.length;
+    const stageHead = st.stage && STAGES[st.stage]
+      ? 'المرحلة: ' + STAGES[st.stage].label + (st.ignoredGrades ? ' (تم تجاهل ' + st.ignoredGrades + ' صفوف خارج المرحلة)' : '') + '\n'
+      : '';
+    st.counts = stageHead + lines.join('\n') + '\nالإجمالي: ' + allRows.length;
 
     if (!allRows.length) {
-      await finish('لا توجد بيانات. ' + (failed.length ? 'فشل: ' + failed.map(function (g) { return GRADE_NAMES[g]; }).join('، ') : 'تحقق من تسجيل الدخول أو حدّث الصفحة (F5).'));
+      await finish('لا توجد بيانات. ' + (failed.length
+        ? 'فشل: ' + failed.map(function (g) { return nameOf(g); }).join('، ')
+        : (st.stage === 'kg'
+          ? 'مرحلة رياض الأطفال (KG) جديدة وقد تحتاج ضبطاً — أبلغ مطوّر الأداة.'
+          : 'تحقق من تسجيل الدخول أو حدّث الصفحة (F5).')));
       return;
     }
 
     st.status = 'جاري إنشاء ملف Excel...';
     save();
-    const bytes = buildXlsx(allRows, refYear);
+    const bytes = buildXlsx(allRows, refYear, st.stage);
     const p2 = function (n) { return String(n).padStart(2, '0'); };
     const d = new Date();
-    const stamp = d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + '-' + p2(d.getHours()) + '-' + p2(d.getMinutes());
+    const stamp = d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + '_' + p2(d.getHours()) + '-' + p2(d.getMinutes());
     const gradesInFile = Array.from(new Set(allRows.map(function (r) { return r._grade; })));
-    const filename = fileBaseFor(gradesInFile) + '-' + stamp + '.xlsx';
+    const filename = fileBaseFor(gradesInFile, st.stage) + '_' + stamp + '.xlsx';
     await saveFile(bytes, filename);
     // tell the teacher exactly which file to look for in the Downloads folder
     st.counts += '\n📁 اسم الملف: ' + filename;
 
     await finish(failed.length
-      ? '✔ اكتمل التنزيل — ' + allRows.length + ' تلميذ، لكن فشل: ' + failed.map(function (g) { return GRADE_NAMES[g]; }).join('، ')
+      ? '✔ اكتمل التنزيل — ' + allRows.length + ' تلميذ، لكن فشل: ' + failed.map(function (g) { return nameOf(g); }).join('، ')
       : '✔ اكتمل التنزيل بنجاح! ' + allRows.length + ' تلميذ في ملف واحد');
   } catch (e) {
     await finish('خطأ: ' + ((e && e.message) || e));
   }
+}
+
+// Live detection for the popup: reads the captured Schoolstage header and the
+// "المرحلة" page label on the ACTIVE tab. Never throws; { ok:false } when the
+// active tab isn't an EMIS page.
+async function detectStageInTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab || tab.id == null || !/^https:\/\/student\.emis\.gov\.eg\//.test(tab.url || '')) {
+    return { ok: false, reason: 'not-emis', stage: null };
+  }
+  const debug = await isDebugOn();
+  let num = null;
+  try {
+    const r = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: readCapturedStage, args: [debug] });
+    num = (r && r[0] && r[0].result) || null;
+  } catch (e) {}
+  let page = null;
+  try {
+    const r = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: detectStageInPage, args: [debug] });
+    page = (r && r[0] && r[0].result) || null;
+  } catch (e) {}
+  const byNum = stageFromSchoolstage(num);
+  const stage = byNum || (page && page.stage) || null;
+  const info = { stage: stage, source: byNum ? 'Schoolstage=' + num : ((page && page.source) || null), text: (page && page.text) || '', ts: Date.now() };
+  if (debug) { try { console.log('[EMIS-TS] popup detection: schoolstage=' + num + ' | page=' + JSON.stringify(page ? { stage: page.stage, source: page.source, text: page.text } : null) + ' => ' + stage + ' (' + info.source + ')'); } catch (e) {} }
+  try { chrome.storage.session.set({ [STAGE_INFO_KEY]: info }); } catch (e) {}
+  return { ok: true, stage: stage, source: info.source, text: info.text };
 }
 
 chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
@@ -355,6 +443,9 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
       if (currentAbort) { try { currentAbort.abort(); } catch (e) {} }
       save();
       sendResponse({ ok: true });
+    } else if (msg.type === 'detect') {
+      detectStageInTab().then(function (res) { sendResponse(res); }).catch(function (e) { sendResponse({ ok: false, error: String(e), stage: null }); });
+      return true; // keep the channel open for the async reply
     } else sendResponse({ ok: false });
   } catch (e) {
     try { sendResponse({ ok: false, error: String(e) }); } catch (e2) {}
@@ -363,4 +454,4 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
 });
 
 // expose for testing in Node (ignored in browser)
-try { if (typeof module !== 'undefined') { module.exports = { fileBaseFor }; } } catch (e) {}
+try { if (typeof module !== 'undefined') { module.exports = { fileBaseFor, resolveStage }; } } catch (e) {}

@@ -14,6 +14,116 @@ const GRADE_NAMES = {
 };
 const API_URL = 'https://studaapi.emis.gov.eg/api/Student/GetSchoolStudent';
 
+// ---------- stage awareness (v3.7) ----------
+// One extension, three account types. The account stage comes from the site's own
+// Schoolstage request header (1=KG, 2=ابتدائي, 3=إعدادي — verified live on all three
+// portals) or, as a fallback, from the "المرحلة" label the portal shows after login.
+const STAGES = {
+  primary: { label: 'ابتدائي', fileWord: 'ابتدائي', grades: [1, 2, 3, 4, 5, 6], names: GRADE_NAMES },
+  prep: { label: 'إعدادي', fileWord: 'إعدادي', grades: [1, 2, 3], names: { 1: 'الصف الأول الإعدادي', 2: 'الصف الثاني الإعدادي', 3: 'الصف الثالث الإعدادي' } },
+  kg: { label: 'حضانة (KG)', fileWord: 'حضانة', grades: [1, 2], names: { 1: 'KG1', 2: 'KG2' } }
+};
+const STAGE_BY_SCHOOLSTAGE = { '1': 'kg', '2': 'primary', '3': 'prep' }; // confirmed live
+
+function stageFromSchoolstage(v) {
+  return STAGE_BY_SCHOOLSTAGE[String(v == null ? '' : v).trim()] || null;
+}
+function stageGradeNames(stage) {
+  return (stage && STAGES[stage] && STAGES[stage].names) || null;
+}
+// Schoolstage value to use when the site's own request header wasn't captured yet
+function fallbackSchoolstage(stage) {
+  if (stage === 'prep') return '3';
+  if (stage === 'kg') return '1';
+  return '2';
+}
+
+// Runs INSIDE the EMIS page (executeScript func — must stay SELF-CONTAINED).
+// Best effort, synchronous: the "المرحلة: X" label first, then a body-text scan,
+// then URL hints. Returns { stage: 'primary'|'prep'|'kg'|null, source, text }.
+function detectStageInPage(debug) {
+  const out = { stage: null, source: null, text: '' };
+  const log = function () {
+    if (!debug) return;
+    try { console.log.apply(null, arguments); } catch (e) {}
+  };
+  log('[EMIS-TS] page scan started (path: ' + String(location.pathname || '') + ')');
+  const norm = function (s) {
+    return String(s || '')
+      .replace(/[\u064B-\u0652\u0640]/g, '')
+      .replace(/[\u0623\u0625\u0622\u0671]/g, '\u0627')
+      .replace(/\u0649/g, '\u064A').replace(/\u0626/g, '\u064A').replace(/\u0629/g, '\u0647')
+      .replace(/\s+/g, ' ');
+  };
+  const fromText = function (raw) {
+    const t = norm(raw).toLowerCase();
+    if (!t) return null;
+    if (t.indexOf('\u0627\u0639\u062F\u0627\u062F') !== -1) return 'prep'; // اعداد / إعداد
+    if (t.indexOf('\u0627\u0628\u062A\u062F') !== -1) return 'primary'; // ابتدائي / ابتدائى
+    if (t.indexOf('\u062D\u0636\u0627\u0646') !== -1) return 'kg'; // حضانة
+    if (t.indexOf('\u0631\u064A\u0627\u0636') !== -1 || t.indexOf('\u0627\u0637\u0641\u0627\u0644') !== -1) return 'kg'; // رياض اطفال
+    if (t.indexOf('\u062A\u0645\u0647\u064A\u062F') !== -1) return 'kg'; // تمهيدي
+    if (t.indexOf('kg') !== -1) return 'kg'; // KG1 / KG2
+    return null;
+  };
+  // 1) small elements that mention "المرحلة" (the header label: المرحله: <span>اعدادى</span>)
+  try {
+    const nodes = document.querySelectorAll('label, span, b, strong, td, p, div');
+    for (let i = 0; i < nodes.length && i < 4000; i++) {
+      const el = nodes[i];
+      if (!el || (el.children && el.children.length > 2)) continue;
+      const raw = el.textContent || '';
+      if (!raw || raw.length > 80 || norm(raw).indexOf('\u0627\u0644\u0645\u0631\u062D\u0644') === -1) continue;
+      const stage = fromText(raw);
+      if (stage) {
+        out.stage = stage; out.source = 'label'; out.text = raw.trim().slice(0, 60);
+        log('[EMIS-TS] label match -> ' + stage + ' | «' + out.text + '»');
+        return out;
+      }
+    }
+  } catch (e) {}
+  // 2) body text: first "المرحلة: ..." occurrence
+  try {
+    const body = norm(document.body ? document.body.innerText : '').slice(0, 30000);
+    const m = body.match(/\u0627\u0644\u0645\u0631\u062D\u0644[\u0647\u0629]?\s*:?\s*(.{0,30})/);
+    if (m) {
+      const stage = fromText(m[1]);
+      if (stage) {
+        out.stage = stage; out.source = 'body'; out.text = m[0].trim().slice(0, 60);
+        log('[EMIS-TS] body text match -> ' + stage + ' | «' + out.text + '»');
+        return out;
+      }
+    }
+  } catch (e) {}
+  // 3) URL hint (e.g. .../kgschool/...)
+  try {
+    const u = String(location.pathname || '').toLowerCase();
+    if (u.indexOf('kgschool') !== -1 || u.indexOf('/kg') !== -1) {
+      out.stage = 'kg'; out.source = 'url';
+      log('[EMIS-TS] url hint -> kg');
+    }
+  } catch (e) {}
+  if (!out.stage) log('[EMIS-TS] page scan finished: no stage label found');
+  return out;
+}
+
+// Runs INSIDE the EMIS page (executeScript func — must stay SELF-CONTAINED).
+// Quick read of the Schoolstage value captured from the site's own API request.
+// `debug` only controls the diagnostic log (default off for regular users).
+function readCapturedStage(debug) {
+  try {
+    const s = sessionStorage.getItem('emisCapturedHeaders');
+    if (!s) {
+      if (debug) { try { console.log('[EMIS-TS] captured headers: none in sessionStorage yet'); } catch (e) {} }
+      return null;
+    }
+    const o = JSON.parse(s);
+    const v = o && o.schoolstage ? String(o.schoolstage) : null;
+    if (debug) { try { console.log('[EMIS-TS] captured headers: schoolstage = ' + v); } catch (e) {} }
+    return v;
+  } catch (e) { return null; }
+}
+
 // ---------- Runs INSIDE the EMIS page: collect auth material, SYNCHRONOUSLY ----------
 // MUST stay synchronous (no fetch/await): the caller relies on this function's direct
 // return value, which every browser delivers reliably. Async injected results are not.
@@ -120,11 +230,11 @@ function normalizeSchoolcode(sc) {
   try { return encodeURIComponent(sc); } catch (e) { return sc; }
 }
 
-function buildApiHeaders(a) {
+function buildApiHeaders(a, stage) {
   const cap = (a && a.captured) || {};
   const h = {
     'Content-Type': 'application/json',
-    'Schoolstage': cap.schoolstage || (a && a.schoolstage) || '2',
+    'Schoolstage': cap.schoolstage || (a && a.schoolstage) || fallbackSchoolstage(stage),
     'Usertype': cap.usertype || (a && a.usertype) || '0'
   };
   if (cap.authorization) h['Authorization'] = cap.authorization;
@@ -173,6 +283,9 @@ function pageFetchPoll(grade) {
 
 // ---------- sorting ----------
 // boys-first / girls-first: grade -> gender group -> class -> name (alphabetical).
+// NOTE (intentional — decided with the user, leave as-is): the name comparison uses
+// the standard Arabic collation of localeCompare('ar') — آ sorts before bare ا while
+// أ/إ count as ا. That is why "آدم" leads the alef group and "ادم" falls after "احمد"/"أحمد".
 function sortStudents(rows, mode) {
   const girlsFirst = mode === 'girls-first';
   const sexRank = (s) => {
@@ -310,7 +423,8 @@ function zipStore(files) {
   return out;
 }
 
-function buildXlsx(rows, refYear) {
+function buildXlsx(rows, refYear, stage) {
+  const names = stageGradeNames(stage) || GRADE_NAMES;
   // shared strings
   const strings = [];
   const idx = new Map();
@@ -327,7 +441,7 @@ function buildXlsx(rows, refYear) {
     S(r.studentCode != null ? String(r.studentCode) : '');
     S(r.studentName || '');
     S(r.nationalId != null ? String(r.nationalId) : '');
-    S(r.className || GRADE_NAMES[r._grade] || '');
+    S(r.className || names[r._grade] || '');
     S(r.classNumber != null ? String(r.classNumber) : '');
     S(r.nationality || 'مصرى');
     S(r.sexId === 1 ? 'ذكر' : 'أنثى');
@@ -392,7 +506,7 @@ function buildXlsx(rows, refYear) {
     const nid = r.nationalId != null ? String(r.nationalId) : '';
     const bv = calcBirthValues(nid, refYear);
     sheetData += nid ? col('C' + rn, dataStyle, S(nid), true) : '<c r="C' + rn + '" s="' + dataStyle + '"/>';
-    sheetData += col('D' + rn, dataStyle, S(r.className || GRADE_NAMES[r._grade] || ''), true);
+    sheetData += col('D' + rn, dataStyle, S(r.className || names[r._grade] || ''), true);
     sheetData += col('E' + rn, dataStyle, S(r.classNumber != null ? String(r.classNumber) : ''), true);
     sheetData += col('F' + rn, dataStyle, S(r.nationality || 'مصرى'), true);
     sheetData += col('G' + rn, dataStyle, S(r.sexId === 1 ? 'ذكر' : 'أنثى'), true);
@@ -418,7 +532,7 @@ function buildXlsx(rows, refYear) {
   const wbRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
   const contentTypes = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>';
   const core = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><cp:lastModifiedBy>StudentDataExporter</cp:lastModifiedBy></cp:coreProperties>';
-  const app = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>StudentDataExporter v3.6</Application></Properties>';
+  const app = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>StudentDataExporter v3.7</Application></Properties>';
 
   return zipStore([
     { name: '[Content_Types].xml', data: encUtf8(contentTypes) },
@@ -434,4 +548,4 @@ function buildXlsx(rows, refYear) {
 }
 
 // expose for testing in Node (ignored in browser)
-try { if (typeof module !== 'undefined') { module.exports = { GRADE_NAMES, API_URL, collectAuthInPage, normalizeSchoolcode, buildApiHeaders, pageFetchStash, pageFetchPoll, sortStudents, calcBirthValues, buildXlsx }; } } catch (e) {}
+try { if (typeof module !== 'undefined') { module.exports = { GRADE_NAMES, STAGES, STAGE_BY_SCHOOLSTAGE, stageFromSchoolstage, stageGradeNames, fallbackSchoolstage, detectStageInPage, readCapturedStage, API_URL, collectAuthInPage, normalizeSchoolcode, buildApiHeaders, pageFetchStash, pageFetchPoll, sortStudents, calcBirthValues, buildXlsx }; } } catch (e) {}
